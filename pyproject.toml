@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Connect local coding agents. Codex, Cursor, Kimi Code, ZCode, Grok Build, Claude Code, or Devin coordinates Antigravity CLI, Grok Build, Kimi Code, DeepSeek Harness, OpenCode, Claude Code, Codex CLI, Devin CLI, ZCode, and MiniMax Code."
 readme = "README.md"
 license = "MIT"
-authors = [{ name = "FeiZhuLulu" }]
+authors = [{ name = "Fei2411" }]
 requires-python = ">=3.11"
 dependencies = [
     "mcp>=2.0.0",
@@ -24,8 +24,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/FeiZhuLulu/Agent-Bridge"
-Repository = "https://github.com/FeiZhuLulu/Agent-Bridge"
+Homepage = "https://github.com/Fei2411/Agent-Bridge"
+Repository = "https://github.com/Fei2411/Agent-Bridge"
 
 [project.scripts]
 agent-bridge = "agent_bridge.server:main"
