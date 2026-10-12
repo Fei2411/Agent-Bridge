@@ -5,7 +5,7 @@ Codex, Cursor, Kimi Code, ZCode, Grok Build, Claude Code, and Devin can all act 
 ## Install
 
 ```powershell
-uv tool install git+https://github.com/FeiZhuLulu/Agent-Bridge.git
+uv tool install git+https://github.com/Fei2411/Agent-Bridge.git
 ```
 
 That is the whole install. Then register the MCP server in the coordinator. The first time a top-level host starts Bridge, the coordinator skill is written automatically (skipped if Bridge was inherited inside a worker); later starts rewrite it only after the bundled skill changed, so local edits survive restarts but not upgrades. Need [uv](https://docs.astral.sh/uv/) first.
@@ -309,13 +309,13 @@ agent-bridge upgrade
 
 - `uv tool` install → `uv tool upgrade agent-bridge`, then refresh skill copies that already exist.
 - git checkout → `git pull` and `uv sync --extra dev` in that checkout, then the same skill refresh.
-- Anything else → the command tells you to `uv tool install git+https://github.com/FeiZhuLulu/Agent-Bridge.git`.
+- Anything else → the command tells you to `uv tool install git+https://github.com/Fei2411/Agent-Bridge.git`.
 
 Restart Codex / Cursor / Kimi Code / ZCode / Grok Build / Claude Code so they reconnect and pick up new tools and the MCP handshake instructions.
 
 What you do **not** redo: `codex mcp add` / `mcp.json`, `%USERPROFILE%\.agent-bridge\agents.toml` (proxy, `[coordinator]`, `set_preferences`), or worker CLIs and their logins. If you copied `ORCHESTRATION.md` into another repo as `AGENTS.md`, that copy is still yours to refresh.
 
-Already on a clone and want the tool install instead: `uv tool install git+https://github.com/FeiZhuLulu/Agent-Bridge.git`, point each host `command` at `agent-bridge`, then delete the clone. The overlay in `~/.agent-bridge` stays.
+Already on a clone and want the tool install instead: `uv tool install git+https://github.com/Fei2411/Agent-Bridge.git`, point each host `command` at `agent-bridge`, then delete the clone. The overlay in `~/.agent-bridge` stays.
 
 ## Multiple coordinators on one machine
 

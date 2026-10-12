@@ -4,7 +4,7 @@
 
 ## Setup
 
-This is the source checkout. End users install with `uv tool install git+https://github.com/FeiZhuLulu/Agent-Bridge.git` and do not need this repo.
+This is the source checkout. End users install with `uv tool install git+https://github.com/Fei2411/Agent-Bridge.git` and do not need this repo.
 
 ```powershell
 uv sync --extra dev
