@@ -139,7 +139,7 @@ def _kimi(cfg: AgentConfig, env: Mapping[str, str]) -> str | None:
     oauth = _object(provider.get("oauth"))
     if provider.get("api_key") or provider_env.get("KIMI_API_KEY") or not oauth:
         return "quota lookup is unsupported for a Kimi API-key provider"
-    if oauth.get("storage") != "file" or oauth.get("key") != "kimi-code":
+    if oauth.get("storage") != "file" or oauth.get("key") not in ("kimi-code", "oauth/kimi-code"):
         return "quota lookup is unsupported for a non-default Kimi OAuth credential slot"
     return None
 
