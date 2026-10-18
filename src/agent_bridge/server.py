@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer
 from mcp_types import ToolAnnotations
 
+from agent_bridge import capabilities
 from agent_bridge.logging_setup import setup_logging
-from agent_bridge.models import DEFAULT_WAIT_SEC
+from agent_bridge.models import DEFAULT_WAIT_SEC, NativeCapability
 from agent_bridge.paths import ensure_home
 from agent_bridge.registry import RESULT_PAGE_MAX_CHARS, Registry
 
@@ -39,6 +40,8 @@ INSTRUCTIONS = (
     "Antigravity, DeepSeek Harness, OpenCode, Claude Code, Codex CLI, Devin CLI, "
     "Cursor, ZCode, MiniMax Code) and keeps their "
     "sessions resumable.\n"
+    "For direct native search/image/video use call_capability, get_capability_result, "
+    "and cancel_capability. Generation and reference uploads require explicit user authorization. "
     "Hard rules: workers are reached only through these tools — never drive the "
     "worker CLIs or GUIs directly. dispatch_task.cwd is this conversation's "
     "project folder (absolute), not the Agent Bridge install path. A wait_task "
@@ -123,6 +126,7 @@ async def dispatch_task(
     title: str | None = None,
     user_requested: bool = False,
     request_id: str | None = None,
+    operation: Literal["image"] | None = None,
 ) -> dict[str, Any]:
     """Start a worker turn. cwd is this coordinator conversation's project (absolute). model/effort are optional coordinator choices (agy: --model/--effort/--project (existing project for cwd, else --new-project); grok: session/setModel after /new; kimi/cursor/opencode/claude/devin/zcode/minimax: session/set_config_option after new/resume, devin has no effort; dsh: legacy demo spawn env + respawn on change, native --profile acp session/set_config_option; codex: exec -m / -c model_reasoning_effort, off->none). Pass session_id to continue. Set user_requested=true only when the user explicitly asked for a worker (required in manual mode). Rejected when coordinator.dispatch_enabled is false, even with user_requested=true. For optional retry deduplication, supply a UUID request_id on the first call and replay the same ID and original arguments on retries; keep session_id omitted if it was originally omitted. Adding an ID only on retry cannot deduplicate the first call. Identical retries reuse the task in this Bridge instance while it is retained; different arguments are rejected. Normal dispatch validation still applies. Bindings are lost on restart and are not shared with other instances. Returns immediately."""
     try:
@@ -136,6 +140,7 @@ async def dispatch_task(
             title=title,
             user_requested=user_requested,
             request_id=request_id,
+            operation=operation,
         )
         return {"ok": True, **result}
     except Exception as exc:
@@ -148,6 +153,56 @@ async def wait_task(ctx: Context, task_id: str, timeout_sec: float = DEFAULT_WAI
     try:
         result = await _registry(ctx).wait_task(task_id, timeout_sec=timeout_sec)
         return {"ok": True, **result}
+    except Exception as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+async def call_capability(
+    ctx: Context,
+    agent: str,
+    capability: NativeCapability,
+    prompt: str,
+    cwd: str,
+    request_id: str,
+    duration_sec: int | None = None,
+    model: str | None = None,
+    effort: str | None = None,
+    user_requested: bool = False,
+    previous_call_id: str | None = None,
+    input_images: list[str] | None = None,
+) -> dict[str, Any]:
+    """Call one native capability directly, without creating a coordinator chat or managing a worker session. Supported integrations: codex search/image, grok search/image/video, minimax search. Video requires duration_sec; media count is one. Runtime/account/features may still be unavailable. Prompt is text driven: count limits instruct the worker and validate results, not a provider-side tool budget. Use only explicitly authorized generation costs and file uploads. Set user_requested=true for explicit Bridge requests in manual mode. A UUID request_id is required on the FIRST call; replay identical arguments to reuse the retained call, never submit a new generation on failure/uncertainty. Optional previous_call_id continues one completed call from the same agent and workspace; image may continue into video, but video-to-video and image-from-search are rejected. Optional input_images are at most four workspace png/jpeg/webp paths. Search accepts no images. Returns call_id immediately. Read with get_capability_result, cancel with cancel_capability. Provider protocol sessions are internal and closed when finished."""
+    try:
+        return {"ok": True, **await capabilities.call_capability(
+            _registry(ctx), agent=agent, capability=capability, prompt=prompt,
+            cwd=cwd, request_id=request_id, duration_sec=duration_sec,
+            model=model, effort=effort, user_requested=user_requested,
+            previous_call_id=previous_call_id, input_images=input_images,
+        )}
+    except Exception as exc:
+        return _error(exc)
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def get_capability_result(
+    ctx: Context, call_id: str, wait_sec: float = 0,
+    cursor: int = 0, max_chars: int = RESULT_PAGE_MAX_CHARS,
+) -> dict[str, Any]:
+    """Read or wait up to 60 seconds for a direct capability call. pending=true until the call has fully finished, including worker shutdown; it is not failure. Repeat this read using the SAME call_id. Continuation (previous_call_id) requires a successful latest compatible call after worker cleanup has finished. Returns native sources or verified task-local file metadata, observed model and provider job evidence. Follow next_cursor for long text. Never rerun a generation to recover its result."""
+    try:
+        return {"ok": True, **await capabilities.get_capability_result(
+            _registry(ctx), call_id, wait_sec=wait_sec, cursor=cursor, max_chars=max_chars,
+        )}
+    except Exception as exc:
+        return _error(exc)
+
+
+@mcp.tool()
+async def cancel_capability(ctx: Context, call_id: str) -> dict[str, Any]:
+    """Cancel a direct capability call locally. Provider cancellation may be unsupported; a stopped local process does not prove remote generation stopped or that no charge occurred. Preserve uncertain job evidence and never automatically resubmit."""
+    try:
+        return {"ok": True, **await capabilities.cancel_capability(_registry(ctx), call_id)}
     except Exception as exc:
         return _error(exc)
 

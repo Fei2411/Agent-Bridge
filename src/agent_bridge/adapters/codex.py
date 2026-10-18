@@ -19,8 +19,10 @@ from agent_bridge.codex_exec import (
     resolve_codex_command,
     yolo_requested,
 )
+from agent_bridge.codex_image import CodexImageTurn
 from agent_bridge.diagnostics import redact_diagnostic
 from agent_bridge.models import Session, Task, TurnResult
+from agent_bridge.native_results import observe_call
 from agent_bridge.processes import (
     drop_pid,
     interrupt_then_reap,
@@ -44,6 +46,7 @@ class CodexAdapter(Adapter):
         super().__init__(agent, home, env_config)
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._cancelled: set[str] = set()
+        self._image_turns: dict[str, CodexImageTurn] = {}
 
     async def ensure_session(self, session: Session) -> None:
         return None
@@ -62,7 +65,10 @@ class CodexAdapter(Adapter):
             effort=task.effort or session.effort,
             resume_id=session.native_session_id,
             yolo=yolo_requested(self.agent.session_meta),
-            config_overrides=self.agent.config_overrides,
+            config_overrides=[
+                *self.agent.config_overrides,
+                *(['web_search="live"'] if task.capability == "search" else []),
+            ],
         )
 
     async def _drain_stderr(self, proc: asyncio.subprocess.Process, session_id: str) -> str:
@@ -105,6 +111,17 @@ class CodexAdapter(Adapter):
 
     async def run_turn(self, session: Session, task: Task) -> TurnResult:
         env = self._worker_env()
+        if task.previous_call_id and task.operation != "image" and not session.native_session_id:
+            raise RuntimeError("native session is missing and cannot be resumed")
+        if task.operation == "image":
+            env = self._enforce_spawn_env(env)
+            image = CodexImageTurn(self.home, session, task, env)
+            self._image_turns[session.session_id] = image
+            try:
+                return await image.run(self._base_cmd(env), self.agent.config_overrides)
+            finally:
+                if image.proc is None or image.proc.returncode is not None:
+                    self._image_turns.pop(session.session_id, None)
         cmd = self._build_cmd(session, task, env)
         env = self._enforce_spawn_env(env)
         kwargs: dict[str, Any] = {}
@@ -168,6 +185,13 @@ class CodexAdapter(Adapter):
                     append_event(session.session_id, "raw", {"value": obj}, self.home)
                     continue
                 apply_codex_event(state, obj)
+                native_item = obj.get("item")
+                if task.capability and obj.get("type") in {"item.started", "item.completed"} and isinstance(native_item, dict) and native_item.get("type") == "web_search":
+                    action = native_item.get("action")
+                    # Started events may not identify the search action yet.
+                    if isinstance(action, dict) or obj.get("type") == "item.completed":
+                        name = "web_search" if isinstance(action, dict) and action.get("type") == "search" else "web_fetch"
+                        observe_call(task, self.home, str(native_item.get("id") or ""), name)
                 event = str(obj.get("type") or "")
                 event_type = "raw"
                 if event == "item.completed":
@@ -183,7 +207,11 @@ class CodexAdapter(Adapter):
                 append_event(
                     session.session_id,
                     event_type,
-                    {"payload": obj} if len(raw) < 4000 else {"truncated": True},
+                    (
+                        {"native_search": True, "source_count": len(state.sources)}
+                        if task.capability and event == "item.completed" and item_type == "web_search"
+                        else {"payload": obj} if len(raw) < 4000 else {"truncated": True}
+                    ),
                     self.home,
                 )
             try:
@@ -206,6 +234,7 @@ class CodexAdapter(Adapter):
                     stop_reason="cancelled",
                     native_session_id=state.thread_id,
                     usage=state.usage,
+                    sources=state.sources if task.capability else [],
                     observed_model=observed_model,
                     observed_effort=observed_effort,
                 )
@@ -221,6 +250,7 @@ class CodexAdapter(Adapter):
                     usage=state.usage,
                     native_session_id=state.thread_id,
                     warnings=warnings,
+                    sources=state.sources if task.capability else [],
                     observed_model=observed_model,
                     observed_effort=observed_effort,
                 )
@@ -233,6 +263,7 @@ class CodexAdapter(Adapter):
                 usage=state.usage,
                 native_session_id=state.thread_id,
                 warnings=warnings,
+                sources=state.sources if task.capability else [],
                 observed_model=observed_model,
                 observed_effort=observed_effort,
             )
@@ -247,6 +278,7 @@ class CodexAdapter(Adapter):
                 usage=state.usage,
                 observed_model=observed_model,
                 observed_effort=observed_effort,
+                sources=state.sources if task.capability else [],
             )
         except Exception:
             await reap_subprocess(proc)
@@ -262,10 +294,16 @@ class CodexAdapter(Adapter):
 
     async def cancel(self, session: Session) -> None:
         self._cancelled.add(session.session_id)
+        if image := self._image_turns.get(session.session_id):
+            await image.cancel()
         proc = self._procs.get(session.session_id)
         if proc is not None:
             await interrupt_then_reap(proc)
 
     async def shutdown(self, session: Session) -> None:
         await self.cancel(session)
+        image = self._image_turns.get(session.session_id)
+        if image is not None and image.proc is not None and image.proc.returncode is None:
+            raise RuntimeError("Codex image worker exit is unconfirmed; cleanup remains pending.")
         self._procs.pop(session.session_id, None)
+        self._image_turns.pop(session.session_id, None)

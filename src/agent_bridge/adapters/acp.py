@@ -23,6 +23,7 @@ from acp.schema import (
 )
 
 from agent_bridge.acp_config import config_option_values
+from agent_bridge.acp_results import AcpNativeResults
 from agent_bridge.adapters.base import STDIO_LIMIT, Adapter
 from agent_bridge.claude_meta import (
     CLAUDE_MODE_BYPASS,
@@ -464,6 +465,14 @@ def _text_of(content: Any) -> str:
         return content.text
     dumped = _dump(content)
     if isinstance(dumped, dict):
+        if dumped.get("type") in {"image", "audio"} or "blob" in dumped:
+            return "[native media omitted]"
+        resource = dumped.get("resource")
+        if isinstance(resource, dict):
+            if "blob" in resource:
+                return "[native media omitted]"
+            text = resource.get("text")
+            return text if isinstance(text, str) else "[native resource omitted]"
         if isinstance(dumped.get("text"), str):
             return dumped["text"]
         return json.dumps(dumped, ensure_ascii=False)
@@ -521,12 +530,27 @@ class _BridgeClient:
         self.files: set[str] = set()
         self.usage: dict[str, Any] = {}
         self.tool_kinds: dict[str, str] = {}
+        self.native: AcpNativeResults | None = None
 
     def reset_turn(self) -> None:
         self.text_parts = []
         self.files = set()
         self.usage = {}
         self.tool_kinds = {}
+
+    def observe_native_message(self, event: Any) -> None:
+        """Remember vendor tool identities before ACP's schema drops extras."""
+        if self.native is None or str(getattr(event.direction, "value", event.direction)) != "incoming":
+            return
+        message = event.message
+        if not isinstance(message, dict) or message.get("method") != "session/update":
+            return
+        params = message.get("params")
+        if not isinstance(params, dict) or params.get("sessionId") != self.native.native_id:
+            return
+        update = params.get("update")
+        if isinstance(update, dict) and update.get("sessionUpdate") in {"tool_call", "tool_call_update"}:
+            self.native.tool_name(update)
 
     async def request_permission(
         self,
@@ -558,6 +582,10 @@ class _BridgeClient:
     async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
         dumped = _dump(update)
         type_name = type(update).__name__
+        native_name = None
+        if self.native and session_id == self.native.native_id and isinstance(dumped, dict):
+            self.native.consume(dumped)
+            native_name = self.native.tool_name(dumped)
         text = ""
         event_type = "raw"
         if type_name == "AgentMessageChunk":
@@ -599,14 +627,20 @@ class _BridgeClient:
                 paths = [loc.get("path") for loc in locations if isinstance(loc, dict) and loc.get("path")]
                 if paths:
                     data["locations"] = paths[:20]
-            if event_type == "tool_call":
+            if event_type == "tool_call" and not native_name:
                 summary = _tool_io_summary(dumped.get("rawInput"))
                 if summary is not None:
                     data["input"] = summary
-            elif dumped.get("status") == "failed":
+            elif dumped.get("status") == "failed" and not native_name:
                 summary = _tool_io_summary(dumped.get("rawOutput"))
                 if summary is not None:
                     data["output"] = summary
+            if native_name:
+                data = {
+                    "update_type": type_name, "tool_call_id": dumped.get("toolCallId"),
+                    "tool_name": native_name, "status": dumped.get("status"),
+                    "source_count": len(self.native.task.sources) if self.native else 0,
+                }
         append_event(self.session_id, event_type, data, self.home)
 
     async def write_text_file(self, session_id: str, path: str, content: str, **kwargs: Any) -> NoReturn:
@@ -894,7 +928,7 @@ class AcpAdapter(Adapter):
         live.client = _BridgeClient(
             session.session_id, self.home, self.agent.permission_policy
         )
-        live.conn = connect_to_agent(live.client, proc.stdin, proc.stdout)
+        live.conn = connect_to_agent(live.client, proc.stdin, proc.stdout, observers=[live.client.observe_native_message])
         live.stderr_task = asyncio.create_task(
             self._drain_stderr(proc, session.session_id, live)
         )
@@ -1621,7 +1655,9 @@ class AcpAdapter(Adapter):
             current_effort, _offered = config_option_values(live.config_options, "reasoning_effort")
             live.applied_effort = current_effort or None
 
-    async def ensure_session(self, session: Session) -> None:
+    async def ensure_session(self, session: Session, *, strict_resume: bool = False) -> None:
+        if strict_resume and not session.native_session_id:
+            raise RuntimeError("native session is missing and cannot be resumed")
         live = self._live.get(session.session_id)
         if (
             live
@@ -1668,12 +1704,18 @@ class AcpAdapter(Adapter):
             except AcpUnavailableError:
                 raise
             except Exception as exc:
+                if strict_resume:
+                    if isinstance(exc, AcpError):
+                        raise
+                    raise RuntimeError("native session could not be resumed") from None
                 log.warning("session/load failed for %s; creating a new session: %s", session.session_id, _redact_diagnostic(str(exc)))
                 load_failure = exc
             else:
                 self._remember_config_options(live, revived)
                 await self._sync_selection(live, session)
                 return
+        if strict_resume:
+            raise RuntimeError("native session could not be resumed")
         created = await self._rpc(
             self._call_new_session(live.conn, session.cwd, self._new_session_meta(session)),
             "session/new",
@@ -1715,12 +1757,14 @@ class AcpAdapter(Adapter):
         if live is not None:
             live.stderr_tail = ""
         try:
-            await self.ensure_session(session)
+            await self.ensure_session(session, strict_resume=bool(task.previous_call_id) and task.operation != "image")
         except Exception as exc:
             raise self._failure(exc, "process_start", session) from None
         live = self._live[session.session_id]
         assert live.conn is not None and live.client is not None
         live.client.reset_turn()
+        native = AcpNativeResults(task, self.home, session.native_session_id, self._env()) if task.capability else None
+        live.client.native = native
         warnings: list[str] = live.pending_warnings
         live.pending_warnings = []
         if self.agent.name not in _MODEL_EFFORT_AGENTS and (task.model or task.effort):
@@ -1745,6 +1789,7 @@ class AcpAdapter(Adapter):
                 warnings=warnings,
                 observed_model=live.applied_model,
                 observed_effort=live.applied_effort,
+                sources=task.sources, output_files=task.output_files, job=task.job,
             )
         except Exception as exc:
             if isinstance(exc, (ConnectionError, EOFError)):
@@ -1754,10 +1799,23 @@ class AcpAdapter(Adapter):
             ) from None
         finally:
             live.prompt_task = None
+            try:
+                if native is not None:
+                    native.end()
+            except Exception as exc:
+                # Preserve the structured transport failure raised above.
+                task.checkpoint_error = True
+                task.warnings.append("Native result finalization failed: " + _redact_diagnostic(str(exc)))
+            finally:
+                live.client.native = None
         stop = getattr(response, "stop_reason", None) or "end_turn"
         if hasattr(stop, "value"):
             stop = stop.value
         stop = str(stop)
+        native_error = None
+        if task.job and task.job.status in {"failed", "uncertain"} and stop != "cancelled":
+            stop = "error"
+            native_error = "Native media delivery failed or remains uncertain; do not resubmit generation automatically."
         usage = live.client.usage
         if not usage:
             dumped_usage = _dump(getattr(response, "usage", None))
@@ -1773,6 +1831,10 @@ class AcpAdapter(Adapter):
             warnings=warnings,
             observed_model=live.applied_model,
             observed_effort=live.applied_effort,
+            sources=task.sources,
+            output_files=task.output_files,
+            job=task.job,
+            error=native_error,
         )
 
     async def cancel(self, session: Session) -> None:
@@ -1797,7 +1859,7 @@ class AcpAdapter(Adapter):
             await self.shutdown(session)
 
     async def shutdown(self, session: Session) -> None:
-        live = self._live.pop(session.session_id, None)
+        live = self._live.get(session.session_id)
         if live is None:
             drop_pid(self.home, session.session_id)
             session.pid = None
@@ -1814,3 +1876,4 @@ class AcpAdapter(Adapter):
                 await live.stderr_task
         drop_pid(self.home, session.session_id)
         session.pid = None
+        self._live.pop(session.session_id, None)
