@@ -13,13 +13,16 @@ from agent_bridge.registry import Registry
 from agent_bridge.server import INSTRUCTIONS, _error, _registry, list_sessions, mcp
 
 
-def test_ten_tools_registered():
+def test_tools_registered():
     names = sorted(mcp._tool_manager._tools)
     assert names == [
+        "call_capability",
+        "cancel_capability",
         "cancel_task",
         "check_task",
         "dispatch_task",
         "end_session",
+        "get_capability_result",
         "get_result",
         "get_transcript",
         "list_agents",
