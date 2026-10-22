@@ -147,9 +147,9 @@ async def test_rejects_bad_context_and_unsupported_worker(catalog_registry, tmp_
     registry, calls = catalog_registry
     with pytest.raises(ValueError, match="absolute"):
         await registry.list_models("kimi", "relative")
-    registry.config.agents["claude"] = AgentConfig(name="claude", protocol="acp", command=["unused"])
+    registry.config.agents["grok"] = AgentConfig(name="grok", protocol="acp", command=["unused"])
     with pytest.raises(NotImplementedError):
-        await registry.list_models("claude", str(tmp_path))
+        await registry.list_models("grok", str(tmp_path))
     registry.dispatch_enabled = False
     with pytest.raises(RuntimeError, match="worker-inherited"):
         await registry.list_models("kimi", str(tmp_path))
@@ -178,7 +178,7 @@ def test_model_discovery_config_overlay(tmp_path):
 
 
 def test_capability_does_not_claim_unimplemented_agents():
-    for name, protocol in [("kimi", "acp"), ("dsh", "acp"), ("codex", "codex"), ("antigravity", "agy")]:
+    for name, protocol in [("kimi", "acp"), ("dsh", "acp"), ("claude", "acp"), ("codex", "codex"), ("antigravity", "agy")]:
         cfg = AgentConfig(name=name, protocol=protocol, command=["unused"])
         assert model_discovery_capability(cfg)["supported"]
     assert not model_discovery_capability(AgentConfig(name="grok", protocol="acp", command=["unused"]))["supported"]

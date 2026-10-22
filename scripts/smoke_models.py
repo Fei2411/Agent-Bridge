@@ -73,7 +73,7 @@ async def run(cwd: Path, agents: list[str], config_home: Path, output: Path | No
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cwd", type=Path, required=True)
-    parser.add_argument("--agents", nargs="+", default=["kimi", "dsh", "antigravity", "codex"])
+    parser.add_argument("--agents", nargs="+", default=["kimi", "dsh", "claude", "antigravity", "codex"])
     parser.add_argument("--config-home", type=Path, default=bridge_home())
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()

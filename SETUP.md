@@ -460,7 +460,7 @@ Supported workers and catalog sources:
 
 | Worker | Source |
 | --- | --- |
-| Kimi, DSH | ACP `initialize` / `session/new` |
+| Kimi, DSH, Claude Code | ACP `initialize` / `session/new` |
 | Antigravity | `agy models` |
 | Codex | app-server `model/list`, using app-server configuration and the worker's `config_overrides` |
 

@@ -347,3 +347,28 @@ async def test_legacy_dsh_handshake_error_is_failure_not_unsupported(discovery, 
     with pytest.raises(AcpError, match="new_session failed"):
         await adapter.list_models(".")
     assert discovery.reaped == [discovery.proc]
+
+
+async def test_claude_catalog_uses_current_model_effort(discovery):
+    adapter, active = discovery.build("claude")
+    discovery.conn.response = snapshot(
+        select_option("model", "opus", [
+            {"value": "opus", "name": "Opus"},
+            {"value": "sonnet", "name": "Sonnet"},
+        ], category="model"),
+        select_option("effort", "default", [
+            {"value": "default", "name": "Default"},
+            {"value": "low", "name": "Low"},
+            {"value": "high", "name": "High"},
+        ], category="thought_level"),
+    )
+    result = await adapter.list_models(".")
+    assert result["default_model"] == "opus"
+    assert result["models"] == [
+        {"id": "opus", "name": "Opus", "is_default": True,
+         "supported_efforts": ["default", "low", "high"]},
+        {"id": "sonnet", "name": "Sonnet", "is_default": False, "supported_efforts": None},
+    ]
+    assert [name for name, _ in discovery.conn.calls] == ["initialize", "new_session", "close"]
+    assert adapter._live == {"existing-session": active}
+    assert discovery.reaped == [discovery.proc]

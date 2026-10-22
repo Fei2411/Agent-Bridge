@@ -26,7 +26,7 @@ class ModelCatalog(BaseModel):
 def model_discovery_capability(cfg: AgentConfig) -> dict:
     """Describe model-discovery support for a worker."""
     supported = cfg.protocol in {"agy", "codex"} or (
-        cfg.protocol == "acp" and cfg.name in {"kimi", "dsh"}
+        cfg.protocol == "acp" and cfg.name in {"kimi", "dsh", "claude"}
     )
     source = {"agy": "agy models", "codex": "codex app-server model/list", "acp": "acp session/new"}
     return {

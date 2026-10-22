@@ -117,7 +117,7 @@ Close coordinators that are holding Bridge, then `agent-bridge upgrade`, then re
 
 Call `list_models(agent="kimi", cwd="/absolute/project")` to discover a worker's
 advertised models before choosing one. Supported workers are Kimi, DSH,
-Antigravity, and Codex; check `list_agents.model_discovery` for support.
+Claude Code, Antigravity, and Codex; check `list_agents.model_discovery` for support.
 Results are cached per worker/project for one hour by default. Use
 `refresh=true` for an immediate update. See [Model discovery](SETUP.md#model-discovery)
 for result fields, configuration, and session behavior.
