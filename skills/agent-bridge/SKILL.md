@@ -5,7 +5,7 @@ description: Coordinate local worker agents (Grok Build, Kimi Code, Antigravity,
 
 # Dispatching workers through Agent Bridge
 
-You are the coordinator: users talk only to you, and you call the workers. Workers are reached **only** through the Agent Bridge MCP tools (`list_agents`, `set_preferences`, `dispatch_task`, `wait_task`, `check_task`, `get_result`, `get_transcript`, `cancel_task`, `list_sessions`, `end_session`). If those tools are missing from this session, stop and say so — never run `grok`, `kimi`, `agy`, `dsh`, `opencode`, `claude`, `claude-agent-acp`, `codex`, `devin`, `zcode-acp-server`, or `mcode` CLIs directly, and never drive their GUIs. The same product can be a coordinator and a worker; those are different processes.
+You are the coordinator: users talk only to you, and you call the workers. Workers are reached **only** through the Agent Bridge MCP tools (`list_agents`, `list_models`, `set_preferences`, `dispatch_task`, `wait_task`, `check_task`, `get_result`, `get_transcript`, `cancel_task`, `list_sessions`, `end_session`). If those tools are missing from this session, stop and say so — never run `grok`, `kimi`, `agy`, `dsh`, `opencode`, `claude`, `claude-agent-acp`, `codex`, `devin`, `zcode-acp-server`, or `mcode` CLIs directly, and never drive their GUIs. The same product can be a coordinator and a worker; those are different processes.
 
 ## Before anything: read the policy
 
@@ -18,6 +18,10 @@ Call `list_agents` first. Its result carries:
 - `agents[].quota` — remaining plan per worker: `status` ok / exhausted / unknown, `windows[]` with `remaining_percent` and `resets_at` / `resets_in_sec` (Codex 5h + weekly, Kimi Code limits, Claude 5h + weekly, Grok weekly), optional `balance` when reported by the provider, `plan`, `cached` / `stale`, `detail`. Information, not a routing rule: `exhausted` means the turn will most likely fail — prefer another worker or tell the user when it resets; `unknown` means Bridge could not read it (unsupported CLI, API-key login, timeout — the reason is in `detail`), never that it is empty. Quota does not change `available`. Custom API/auth endpoints are unsupported and return `unknown` before credentials or cached quota are read. Cached readings expire at the earliest window reset. DSH balance lookup is unsupported.
 
 Claude `status`: shared `5h`/`weekly` only. Before dispatch, even if `ok`, check the target model's `weekly:opus`/`weekly:sonnet`: 0% is exhausted; missing/null unknown. Report reset time or a user-permitted alternative. Model-only data leaves shared status unknown.
+
+## Model discovery
+
+When `coordinator.dispatch_enabled=true` and `list_agents.model_discovery.supported=true`, use `list_models(agent=..., cwd=...)` to obtain worker-advertised model IDs before explicitly selecting a model. Supply this conversation's absolute project directory; use `refresh=true` after changing accounts or worker configuration. `supported_efforts` reports worker-native levels; pass `off|low|medium|high|max` to `dispatch_task.effort` for adapter mapping. See SETUP.md for result fields, caching, and session behavior.
 
 ## Step 1 — dispatch, or do it yourself?
 

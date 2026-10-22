@@ -446,6 +446,56 @@ uv run --no-sync python scripts/setup_lab.py
 
 If a worker is missing, `list_agents` reports `available: false` and the coordinator should pick another worker or do the work itself.
 
+### Model discovery
+
+`list_agents` includes a `model_discovery` capability block. Query a supported
+worker on demand, using this conversation's absolute project directory:
+
+```text
+list_models(agent="kimi", cwd="/absolute/project")
+list_models(agent="antigravity", cwd="/absolute/project", refresh=true)
+```
+
+Supported workers and catalog sources:
+
+| Worker | Source |
+| --- | --- |
+| Kimi, DSH, Claude Code | ACP `initialize` / `session/new` |
+| Antigravity | `agy models` |
+| Codex | app-server `model/list`, using app-server configuration and the worker's `config_overrides` |
+
+Discovery uses a separate worker process, closed after the lookup. ACP discovery
+denies permission requests and may leave an empty session in worker history.
+`list_models` is available when `coordinator.dispatch_enabled=true`.
+
+Result fields:
+
+| Field | Meaning |
+| --- | --- |
+| `models` | Advertised choices with `id`, `name`, `is_default`, and `supported_efforts` |
+| `default_model` | Default model ID reported by the query session; `null` when unknown |
+| `supported_efforts` | Worker-native effort levels for a model; `null` means unknown, `[]` means explicitly no levels |
+| `source` | Worker interface used for discovery |
+| `agent`, `cwd` | Worker name and resolved project directory |
+| `fetched_at`, `cached` | Fetch timestamp and whether this response came from cache |
+| `availability="advertised"`, `invocation_verified=false` | Results describe the worker's catalog; successful model invocation is a separate check |
+| `effort_vocabulary="worker_native"` | Effort names use the worker's vocabulary |
+| `warnings` | Discovery diagnostics |
+
+For dispatch, pass `off|low|medium|high|max` to `dispatch_task.effort`;
+the adapter maps that value to the worker's effort settings.
+
+```toml
+[models]
+cache_sec = 3600   # one hour; 0 disables reuse
+timeout_sec = 30   # complete lookup deadline, including worker initialization
+```
+
+The cache is per worker and project, in memory for this Bridge instance.
+Expired entries are refreshed on the next query. Use `refresh=true` after
+changing accounts, worker configuration, or model access. A failed refresh
+returns an error and preserves the last successful cache entry.
+
 The coordinator can pin a worker model and thinking intensity on `dispatch_task`:
 
 ```text

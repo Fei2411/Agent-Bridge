@@ -20,6 +20,10 @@ from agent_bridge.codex_exec import (
     yolo_requested,
 )
 from agent_bridge.diagnostics import redact_diagnostic
+from agent_bridge.model_discovery_exec import (
+    codex_app_server_list_models,
+    parse_codex_models,
+)
 from agent_bridge.models import Session, Task, TurnResult
 from agent_bridge.processes import (
     drop_pid,
@@ -47,6 +51,19 @@ class CodexAdapter(Adapter):
 
     async def ensure_session(self, session: Session) -> None:
         return None
+
+    async def list_models(self, cwd: str) -> dict[str, Any]:
+        """Query app-server model/list using its configuration and config_overrides."""
+        env = self._enforce_spawn_env(self._worker_env())
+        command = await asyncio.to_thread(
+            resolve_codex_command, self.agent.command, self.agent.fallback_commands, env=env
+        )
+        argv = [*command]
+        for item in self.agent.config_overrides:
+            argv += ["-c", item]
+        argv.append("app-server")
+        entries = await codex_app_server_list_models(argv, env=env, cwd=cwd)
+        return parse_codex_models(entries)
 
     def _worker_env(self) -> dict[str, str]:
         return build_worker_env(self.agent.env, config=self.env_config, worker_context=True, home=self.home)

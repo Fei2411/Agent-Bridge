@@ -14,7 +14,7 @@ Call `list_agents` first and re-read `coordinator` before every dispatch.
 
 When the user states a **lasting** preference, persist it with `set_preferences`. Its `instructions` argument replaces the stored text — read the current value first and write the merge. One-off wishes are not preferences.
 
-Workers are reached **only** through Agent Bridge MCP tools (`list_agents`, `dispatch_task`, `wait_task`, `check_task`, `get_result`, `get_transcript`, `cancel_task`, `list_sessions`, `end_session`). If those tools are missing, stop and say so. Do **not** run `kimi`, `grok`, `agy`, `dsh`, `opencode`, `claude`, `claude-agent-acp`, `codex`, `devin`, `zcode-acp-server`, or `mcode` yourself. `git` / `pytest` after a turn is review, not a substitute for dispatch.
+Workers are reached **only** through Agent Bridge MCP tools (`list_agents`, `list_models`, `dispatch_task`, `wait_task`, `check_task`, `get_result`, `get_transcript`, `cancel_task`, `list_sessions`, `end_session`). If those tools are missing, stop and say so. Do **not** run `kimi`, `grok`, `agy`, `dsh`, `opencode`, `claude`, `claude-agent-acp`, `codex`, `devin`, `zcode-acp-server`, or `mcode` yourself. `git` / `pytest` after a turn is review, not a substitute for dispatch.
 
 ## Step 1 — dispatch, or do it yourself?
 
@@ -48,6 +48,8 @@ User `instructions` override this.
 In `auto`/`eager`, tell the user after the fact. In `manual`, their explicit request is the permission.
 
 ## How to dispatch
+
+When `dispatch_enabled=true`, use supported workers' `list_models(agent,cwd)` before choosing a model. See SETUP.md for usage details.
 
 1. `list_agents`. Read `coordinator.mode` / `instructions` / `dispatch_enabled` and `env.proxy` / `env.warnings`. A null proxy on a direct network is normal; if a worker fails with connect errors on a proxied machine, fix `[env.proxy]` instead of retrying.
 2. `dispatch_task` with `cwd` = **this conversation's project folder** (absolute). Never the Agent Bridge install path (unless the user is editing Bridge). Never a temp dir. The `message` must be self-contained: background, absolute paths, acceptance criteria, things not to do. Leave `model`/`effort` unset unless you have a reason.

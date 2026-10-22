@@ -18,6 +18,7 @@ from acp.schema import (
     ClientCapabilities,
     DeniedOutcome,
     Implementation,
+    NewSessionResponse,
     PermissionOption,
     RequestPermissionResponse,
 )
@@ -688,11 +689,139 @@ class _Live:
         self.pending_warnings: list[str] = []
 
 
+class _DiscoveryClient(_BridgeClient):
+    """ACP discovery client that denies permission requests and discards updates."""
+
+    async def request_permission(
+        self,
+        session_id: str,
+        tool_call: Any,
+        options: list[Any] | None,
+        **kwargs: Any,
+    ) -> RequestPermissionResponse:
+        return RequestPermissionResponse(outcome=DeniedOutcome(outcome="cancelled"))
+
+    async def session_update(self, session_id: str, update: Any, **kwargs: Any) -> None:
+        return None
+
+
+def _acp_model_catalog(response: NewSessionResponse, agent_name: str) -> dict[str, Any]:
+    """Extract model choices and current-model effort levels from an ACP snapshot."""
+    options = response.config_options or []
+    model_option_id = next(
+        (option.id for option in options if option.id == "model" or option.category == "model"),
+        "model",
+    )
+    current, _offered = config_option_values(options, model_option_id)
+
+    def model_id(value: str) -> str:
+        return (_dsh_native_model_label(value) or value) if agent_name == "dsh" else value
+
+    default = model_id(current) if current else None
+    choices = [(model_id(value), name) for value, name in _cursor_choices(options, model_option_id)]
+    efforts: list[str] | None = None
+    for option in options:
+        if option.category == "thought_level" or option.id in {
+            "thinking", "reasoning_effort",
+        }:
+            _current_effort, offered = config_option_values(options, option.id)
+            # A boolean switch describes thinking enablement, not effort levels.
+            if offered and set(offered) != {"true", "false"}:
+                efforts = offered
+                break
+    return {
+        "source": "acp",
+        "models": [
+            {
+                "id": value,
+                "name": name,
+                "is_default": value == default,
+                "supported_efforts": efforts if value == default else None,
+            }
+            for value, name in choices
+        ],
+        "default_model": default,
+        "warnings": [] if choices else [
+            "Model discovery is unavailable: the ACP session did not advertise a model catalog."
+        ],
+    }
+
+
+async def _cleanup_discovery(live: _Live) -> None:
+    try:
+        if live.conn is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.wait_for(live.conn.close(), timeout=2)
+    finally:
+        try:
+            if live.proc is not None:
+                await reap_subprocess(live.proc)
+        finally:
+            if live.stderr_task is not None:
+                live.stderr_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await live.stderr_task
+
+
 class AcpAdapter(Adapter):
     def __init__(self, agent: AgentConfig, home: Path, env_config=None) -> None:
         super().__init__(agent, home, env_config)
         self._live: dict[str, _Live] = {}
         self._cursor_models_cache: dict[str, str] | None = None
+
+    async def list_models(self, cwd: str) -> dict[str, Any]:
+        """Read a catalog through a separate ACP initialize/session-new handshake.
+
+        The caller controls the deadline; this method closes the process on exit.
+        """
+        if self.agent.name == "dsh":
+            cmd = resolve_dsh_command(self.agent.command, self.agent.fallback_commands)
+        else:
+            cmd = resolve_command(self.agent.command, self.agent.fallback_commands)
+        env = self._env()
+        if self.agent.name == "dsh":
+            cmd, env = prepare_dsh_launch(cmd, env)
+        env = self._enforce_spawn_env(env)
+        kwargs: dict[str, Any] = {}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        live = _Live()
+        try:
+            live.proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env,
+                cwd=self.agent.cwd or cwd or None,
+                limit=STDIO_LIMIT,
+                **kwargs,
+            )
+            proc = live.proc
+            client = _DiscoveryClient("model-discovery", self.home, permission_policy="deny")
+            live.conn = connect_to_agent(client, proc.stdin, proc.stdout)
+            live.stderr_task = asyncio.create_task(self._drain_stderr(proc, "model-discovery", live))
+            await live.conn.initialize(
+                protocol_version=PROTOCOL_VERSION,
+                client_info=Implementation(name="agent-bridge", version="0.1.0"),
+                client_capabilities=ClientCapabilities(),
+            )
+            created = await live.conn.new_session(cwd=cwd, mcp_servers=[])
+            return _acp_model_catalog(created, self.agent.name)
+        except Exception as exc:
+            raise self._failure(
+                exc, "model_discovery", proc=live.proc, stderr=live.stderr_tail,
+            ) from None
+        finally:
+            # The outer deadline can fire during close(), after the handshake
+            # already succeeded. Keep cleanup alive and await the reap before
+            # propagating that cancellation to the registry.
+            cleanup = asyncio.create_task(_cleanup_discovery(live))
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                await cleanup
+                raise
 
     def _env(self) -> dict[str, str]:
         env = build_worker_env(self.agent.env, config=self.env_config, worker_context=True, home=self.home)

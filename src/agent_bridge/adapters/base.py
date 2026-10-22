@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from agent_bridge.config import AgentConfig, EnvConfig
 from agent_bridge.models import Session, Task, TurnResult
@@ -31,6 +32,10 @@ class Adapter(ABC):
 
     def can_revive(self) -> bool:
         return self.agent.revivable
+
+    async def list_models(self, cwd: str) -> dict[str, Any]:
+        """Return the worker's advertised model catalog."""
+        raise NotImplementedError(f"model discovery is not implemented for {self.agent.name}")
 
     def _enforce_spawn_env(self, env: Mapping[str, str]) -> dict[str, str]:
         """Last ``env.deny`` gate on the exact env a worker spawn receives.

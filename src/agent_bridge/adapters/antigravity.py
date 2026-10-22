@@ -15,6 +15,10 @@ from urllib.parse import unquote
 from agent_bridge.adapters.base import STDIO_LIMIT, Adapter
 from agent_bridge.config import AgentConfig
 from agent_bridge.diagnostics import redact_diagnostic
+from agent_bridge.model_discovery_exec import (
+    parse_agy_models_output,
+    read_agy_models,
+)
 from agent_bridge.models import Session, Task, TurnResult, agy_effort
 from agent_bridge.processes import (
     drop_pid,
@@ -242,6 +246,17 @@ class AgyAdapter(Adapter):
 
     async def ensure_session(self, session: Session) -> None:
         return None
+
+    async def list_models(self, cwd: str) -> dict[str, Any]:
+        """Read the catalog from ``agy models`` in the project directory."""
+        source = "agy models"
+        cmd = resolve_command(self.agent.command, self.agent.fallback_commands)
+        env = self._enforce_spawn_env(
+            build_worker_env(self.agent.env, config=self.env_config, worker_context=True, home=self.home)
+        )
+        stdout = await read_agy_models(cmd, env=env, cwd=cwd)
+        return {"source": source, "models": parse_agy_models_output(stdout),
+                "default_model": None, "warnings": []}
 
     def _build_cmd(self, session: Session, task: Task) -> list[str]:
         cmd = resolve_command(self.agent.command, self.agent.fallback_commands)

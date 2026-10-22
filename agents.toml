@@ -253,3 +253,8 @@ command = ["codex"]
 # session_meta = { yolo = true }
 revivable = true
 idle_unload_sec = 0
+
+# On-demand worker model catalogs.
+[models]
+cache_sec = 3600
+timeout_sec = 30

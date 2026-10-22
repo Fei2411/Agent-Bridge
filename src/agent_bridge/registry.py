@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import logging
@@ -28,6 +29,7 @@ from agent_bridge.config import (
 from agent_bridge.diagnostics import redact_diagnostic
 from agent_bridge.grok_observe import observe_grok_session
 from agent_bridge.kimi_observe import observe_kimi_session
+from agent_bridge.model_catalog import ModelCatalog, model_discovery_capability
 from agent_bridge.models import (
     DEFAULT_WAIT_SEC,
     TERMINAL_STATUSES,
@@ -115,6 +117,7 @@ STATE_MESSAGE_MAX = 2000
 ORPHAN_RESULT_MIN_AGE_SEC = 3600
 # Persisted request_id bindings kept; bindings also drop with their task.
 REQUEST_KEEP_MAX = 1000
+MODEL_CACHE_MAX = 128
 
 
 def _new_id(prefix: str) -> str:
@@ -166,6 +169,8 @@ class Registry:
         # of request tuples so bindings can persist to state.json compactly.
         self._requests: dict[str, tuple[str, str]] = {}
         self._adapters: dict[str, Adapter] = {}
+        self._model_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+        self._model_locks: dict[str, asyncio.Lock] = {}
         self._done: dict[str, asyncio.Event] = {}
         self._idle: dict[str, asyncio.Task[None]] = {}
         self._bg: dict[str, asyncio.Task[None]] = {}
@@ -593,9 +598,53 @@ class Registry:
         async def describe(cfg: AgentConfig) -> dict:
             row = await probe_agent(cfg, self.config.env)
             row["quota"] = await self._quota_for(cfg, available=bool(row.get("available")))
+            row["model_discovery"] = model_discovery_capability(cfg)
             return row
 
         return list(await asyncio.gather(*(describe(cfg) for cfg in self.config.agents.values())))
+
+    async def list_models(self, agent: str, cwd: str, *, refresh: bool = False) -> dict:
+        """Discover and cache a worker's model catalog."""
+        if not self.dispatch_enabled:
+            raise RuntimeError("model discovery is disabled inside worker-inherited Bridge instances")
+        cfg = self.config.get(agent)
+        if not model_discovery_capability(cfg)["supported"]:
+            raise NotImplementedError(f"model discovery is not implemented for {agent}")
+        path = Path(cwd)
+        if not path.is_absolute() or not path.is_dir():
+            raise ValueError("cwd must be an existing absolute project directory")
+        resolved = str(path.resolve())
+        key = (agent, resolved)
+        previous = self._model_cache.get(key)
+        if not refresh and previous and time.monotonic() - previous[0] < self.config.models.cache_sec:
+            return {**copy.deepcopy(previous[1]), "cached": True}
+        lock = self._model_locks.setdefault(agent, asyncio.Lock())
+        try:
+            async with asyncio.timeout(self.config.models.timeout_sec), lock:
+                previous = self._model_cache.get(key)
+                if not refresh and previous and time.monotonic() - previous[0] < self.config.models.cache_sec:
+                    return {**copy.deepcopy(previous[1]), "cached": True}
+                adapter = build_adapter(cfg, self.home, self.config.env)
+                raw = await adapter.list_models(resolved)
+                catalog = ModelCatalog.model_validate(raw)
+                result = {
+                    **catalog.model_dump(mode="json"),
+                    "agent": agent,
+                    "cwd": resolved,
+                    "fetched_at": iso(),
+                    "cached": False,
+                    "availability": "advertised",
+                    "invocation_verified": False,
+                    "effort_vocabulary": "worker_native",
+                }
+                result["warnings"] = [redact_diagnostic(w) for w in result["warnings"]]
+                if key not in self._model_cache and len(self._model_cache) >= MODEL_CACHE_MAX:
+                    oldest = min(self._model_cache, key=lambda k: self._model_cache[k][0])
+                    self._model_cache.pop(oldest)
+                self._model_cache[key] = (time.monotonic(), copy.deepcopy(result))
+                return result
+        except Exception as exc:
+            raise RuntimeError(redact_diagnostic(str(exc)) or type(exc).__name__) from None
 
     async def _quota_for(self, cfg: AgentConfig, *, available: bool) -> dict:
         """The ``quota`` block for one ``list_agents`` row. Never raises, never gates ``available``."""

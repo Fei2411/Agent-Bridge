@@ -104,6 +104,7 @@ Close coordinators that are holding Bridge, then `agent-bridge upgrade`, then re
 | Tool | Role |
 | --- | --- |
 | `list_agents` | Probe workers, report remaining quota, proxy/env + coordinator policy |
+| `list_models` | Discover advertised models for one worker/project, with cached results |
 | `set_preferences` | Persist coordinator mode / routing preferences |
 | `dispatch_task` | Start or resume a turn in the project `cwd` |
 | `wait_task` | Block up to `timeout_sec` (default 180) |
@@ -113,6 +114,13 @@ Close coordinators that are holding Bridge, then `agent-bridge upgrade`, then re
 | `cancel_task` | Cancel the in-flight turn |
 | `list_sessions` | Known sessions |
 | `end_session` | Shut down a worker process |
+
+Call `list_models(agent="kimi", cwd="/absolute/project")` to discover a worker's
+advertised models before choosing one. Supported workers are Kimi, DSH,
+Claude Code, Antigravity, and Codex; check `list_agents.model_discovery` for support.
+Results are cached per worker/project for one hour by default. Use
+`refresh=true` for an immediate update. See [Model discovery](SETUP.md#model-discovery)
+for result fields, configuration, and session behavior.
 
 `get_result` returns up to 60,000 characters per call. Continue with
 `next_cursor` while `has_more` is true. Detailed work events remain available

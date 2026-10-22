@@ -151,6 +151,13 @@ class ServerConfig(BaseModel):
     idle_exit_sec: int = 0
 
 
+class ModelsConfig(BaseModel):
+    """Cache lifetime and timeout for on-demand model discovery."""
+
+    cache_sec: float = Field(default=3600.0, ge=0)
+    timeout_sec: float = Field(default=30.0, gt=0)
+
+
 class QuotaConfig(BaseModel):
     """Remaining-quota lookup that rides along with ``list_agents``.
 
@@ -218,6 +225,7 @@ class AppConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
     coordinator: CoordinatorConfig = Field(default_factory=CoordinatorConfig)
     quota: QuotaConfig = Field(default_factory=QuotaConfig)
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
     warnings: list[str] = Field(default_factory=list)
 
     def get(self, name: str) -> AgentConfig:
@@ -472,7 +480,7 @@ def load_config(home: Path | None = None) -> AppConfig:
             f"{overlay_path} is not valid TOML: {exc}. "
             "Fix or delete the file, then restart the Bridge."
         ) from exc
-    supported_sections = {"agents", "env", "server", "coordinator", "quota"}
+    supported_sections = {"agents", "env", "server", "coordinator", "quota", "models"}
     unsupported = sorted(set(overlay_raw) - supported_sections)
     warnings = []
     if unsupported:
@@ -509,11 +517,19 @@ def load_config(home: Path | None = None) -> AppConfig:
     coord_raw["mode"] = normalize_coordinator_mode(coord_raw.get("mode"))
     coordinator = CoordinatorConfig.model_validate(coord_raw)
     quota = QuotaConfig.model_validate({**_coerce_quota(bundled_raw), **_coerce_quota(overlay_raw)})
+    models_raw: dict[str, Any] = {}
+    for raw in (bundled_raw, overlay_raw):
+        block = raw.get("models", {})
+        if not isinstance(block, dict):
+            raise ValueError("[models] must be a TOML table")
+        models_raw.update(block)
+    models = ModelsConfig.model_validate(models_raw)
     return AppConfig(
         agents=agents,
         env=env,
         server=server,
         coordinator=coordinator,
         quota=quota,
+        models=models,
         warnings=warnings,
     )

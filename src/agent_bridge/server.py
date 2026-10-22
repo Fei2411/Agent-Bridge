@@ -64,6 +64,9 @@ INSTRUCTIONS = (
     "or end_session. When "
     "dispatch_enabled is true and the user states a lasting preference, "
     "persist it with set_preferences."
+    " Use list_models(agent, cwd) to discover model IDs before choosing one; "
+    "list_agents.model_discovery describes support. See the tool description "
+    "for result semantics and eligibility."
 )
 
 mcp = MCPServer[Registry]("agent-bridge", instructions=INSTRUCTIONS, lifespan=lifespan)
@@ -93,6 +96,15 @@ async def list_agents(ctx: Context) -> dict[str, Any]:
             "env": await registry.env_status(),
             "coordinator": registry.coordinator_status(),
         }
+    except Exception as exc:
+        return _error(exc)
+
+
+@mcp.tool(annotations=READ_ONLY)
+async def list_models(ctx: Context, agent: str, cwd: str, refresh: bool = False) -> dict[str, Any]:
+    """List models advertised by a supported worker. Pass this conversation's absolute project directory as cwd. Results are cached per worker/project for one hour by default ([models] cache_sec); refresh=true requests an immediate update. default_model reports the query session's advertised default. supported_efforts reports worker-native levels: null means unknown, [] means explicitly no levels. For dispatch_task.effort, use off|low|medium|high|max for adapter mapping. Available when coordinator.dispatch_enabled=true."""
+    try:
+        return {"ok": True, **await _registry(ctx).list_models(agent, cwd, refresh=refresh)}
     except Exception as exc:
         return _error(exc)
 
