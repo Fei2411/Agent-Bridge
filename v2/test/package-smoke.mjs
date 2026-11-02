@@ -39,5 +39,6 @@ try {
     await delay(10);
   }
   assert.ok(stopped, 'Installed Hub did not stop after the smoke test');
-  await rm(scratch, { recursive: true, force: true });
+  // Windows can briefly retain the daemon's cwd handle after discovery removal.
+  await rm(scratch, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
