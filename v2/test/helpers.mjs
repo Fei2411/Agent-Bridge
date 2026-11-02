@@ -24,7 +24,7 @@ export async function fixture(t) {
   t.after(async () => {
     await Promise.all(clients.map(client => client.close()));
     await Promise.all(children.map(child => stop(child)));
-    await rm(home, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   async function start() {
     const child = spawn(process.execPath, [cli, 'hub', '--home', home, '--config', join(home, 'agents.toml')], { stdio: ['ignore', 'ignore', 'pipe'] });

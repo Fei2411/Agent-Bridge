@@ -27,7 +27,7 @@ test('concurrent CLI clients auto-start one independent Hub and can stop it expl
       if (!exists) break;
       await delay(10);
     }
-    await rm(home, { recursive: true, force: true });
+    await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   await Promise.all(['alice', 'bob'].map(id => command(home, 'call', 'list_peers', '--agent-id', id, '--project', 'daemon', '--config', join(home, 'agents.toml'))));
   const endpoint = JSON.parse(await readFile(join(home, 'hub.json'), 'utf8'));

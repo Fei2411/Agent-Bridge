@@ -8,7 +8,7 @@ import { Store } from '../dist/store.js';
 
 test('v1 message retries retain their receipt and acknowledgement after database migration', async t => {
   const home = await mkdtemp(join(tmpdir(), 'bridge-migration-'));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  t.after(() => rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   const path = join(home, 'hub.sqlite'), old = new DatabaseSync(path);
   // Frozen v1 storage contract: five-field request key, no wake field.
   old.exec(`CREATE TABLE agents(id TEXT PRIMARY KEY, project_id TEXT NOT NULL, data TEXT NOT NULL);

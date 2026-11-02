@@ -20,7 +20,7 @@ test('finishing one parallel wait does not erase another dependency', { timeout:
   const store = new Store(':memory:');
   const runtime = new Runtime(home, store, await loadConfig(home, configPath), new EventEmitter(), configPath);
   const controller = new AbortController();
-  t.after(async () => { controller.abort(); await runtime.close(); store.close(); await rm(home, { recursive: true, force: true }); });
+  t.after(async () => { controller.abort(); await runtime.close(); store.close(); await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   store.register({ id: 'owner', kind: 'external', projectId: 'p', name: 'Owner' });
   const tasks = await Promise.all([1, 2, 3].map(() => runtime.dispatch({ agent: 'kimi', projectId: 'p', cwd: home, requesterId: 'owner', message: 'WAIT_FOR_CANCEL', userRequested: false })));
   for (const task of tasks) while (!store.session(task.sessionId).nativeSessionId) await delay(10);
