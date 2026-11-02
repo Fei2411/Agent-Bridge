@@ -6,6 +6,34 @@ on:
   pull_request:
 
 jobs:
+  hub-v2:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run smoke:package
+      - name: Real OpenCode with a local mock model (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          OPENCODE_SMOKE_BIN: ${{ runner.temp }}/opencode-smoke/node_modules/.bin/opencode
+        run: |
+          npm install --prefix "$RUNNER_TEMP/opencode-smoke" opencode-ai@1.19.5 --no-audit --no-fund
+          npm run smoke:opencode
+
   test:
     strategy:
       fail-fast: false

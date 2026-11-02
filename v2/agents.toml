@@ -1,0 +1,232 @@
+# Environment is first-class. Codex (and some MCP hosts) spawn this server
+# with a cleared process environment, then we spawn worker CLIs from that.
+# Interactive shell wrappers (PowerShell `function grok { $env:HTTPS_PROXY=... }`)
+# never run. Pin values in ~/.agent-bridge/agents.toml or inherit them back.
+
+[env]
+# Restore these from the Windows user/machine environment when missing.
+# API keys are optional passthroughs — none of them is required to list an agent.
+inherit = [
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "ALL_PROXY",
+  "NO_PROXY",
+  "GROK_WEB_FETCH_PROXY",
+  "AGENT_BRIDGE_HTTP_PROXY",
+  "AGENT_BRIDGE_HTTPS_PROXY",
+  "AGENT_BRIDGE_NO_PROXY",
+  "DSH_HOME",
+  "KIMI_CODE_HOME",
+  "KIMI_SHELL_PATH",
+  "KIMI_API_KEY",
+  "KIMI_BASE_URL",
+  "KIMI_CODE_BASE_URL",
+  "KIMI_CODE_OAUTH_HOST",
+  "KIMI_OAUTH_HOST",
+  "KIMI_MODEL_BASE_URL",
+  "KIMI_MODEL_NAME",
+  "KIMI_MODEL_API_KEY",
+  "KIMI_MODEL_PROVIDER_TYPE",
+  "MOONSHOT_API_KEY",
+  "DEEPSEEK_API_KEY",
+  "OPENCODE_API_KEY",
+  "XAI_API_KEY",
+  "GROK_API_KEY",
+  "GROK_HOME",
+  "GROK_AUTH_PATH",
+  "GROK_CLI_CHAT_PROXY_BASE_URL",
+  "GROK_XAI_API_BASE_URL",
+  "GROK_MODELS_BASE_URL",
+  "GROK_MODELS_LIST_URL",
+  "GROK_OIDC_ISSUER",
+  "GROK_OIDC_CLIENT_ID",
+  "GROK_OAUTH2_ISSUER",
+  "GROK_OAUTH2_CLIENT_ID",
+  "GROK_LOCAL_AUTH",
+  "GROK_AUTH_PROVIDER_COMMAND",
+  "GROK_MANAGED_CONFIG_URL",
+  "GROK_CODE_XAI_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENAI_BASE_URL",
+  "CODEX_API_KEY",
+  "CODEX_CLI_PATH",
+  "CODEX_HOME",
+  "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
+  "ANTHROPIC_BASE_URL",
+  "CLAUDE_CODE_USE_BEDROCK",
+  "CLAUDE_CODE_USE_VERTEX",
+  "CLAUDE_CODE_USE_FOUNDRY",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "CLAUDE_CONFIG_DIR",
+  "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+  "OPENROUTER_API_KEY",
+  "WINDSURF_API_KEY",
+  "ZCODE_HOME",
+  "ZCODE_BIN",
+  "ZCODE_NODE",
+  "ZCODE_MODEL",
+  "ZCODE_PROVIDER",
+  "ZCODE_BASE_URL",
+  "ZCODE_ACP_MODE",
+  "ZCODE_ACP_DEBUG",
+  "MINIMAX_DATA_DIR",
+  "MAVIS_DATA_DIR",
+  "MAVIS_REGION",
+  "MAVIS_BUILD_ENV",
+  "MAVIS_PROFILE",
+  "MCODE_CONFIG_DIR",
+  "MCODE_API_BASE_URL",
+  "MCODE_AUTH_BASE_URL",
+  "MCODE_REGION",
+  "MCODE_CLIENT_ID",
+  "MCODE_SCOPE",
+  "MCODE_AUTH_PROVIDER",
+  "GOOGLE_API_KEY",
+  "GEMINI_API_KEY",
+  "CLOUDFLARE_API_TOKEN",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "REQUESTS_CA_BUNDLE",
+  "CURL_CA_BUNDLE",
+  "NODE_EXTRA_CA_CERTS",
+  "PYTHONUTF8",
+  "PYTHONIOENCODING",
+  "LANG",
+  "LC_ALL",
+]
+# Fill missing proxies from Windows Internet Settings; shell wrappers are not executed.
+discover_proxy = true
+
+[env.set]
+# Explicit values (do not commit secrets). Highest priority after per-agent env.
+# HTTPS_PROXY = "http://127.0.0.1:7897"
+
+[env.proxy]
+# Shorthand applied to HTTP_PROXY, HTTPS_PROXY, ALL_PROXY, GROK_WEB_FETCH_PROXY.
+# url = "http://127.0.0.1:7897"
+# no_proxy = "localhost,127.0.0.1,::1"
+
+[coordinator]
+# How eagerly the coordinator should dispatch to workers.
+#   manual — only when the user explicitly asks; Bridge blocks dispatch_task
+#            without user_requested=true (alias: safe)
+#   auto   — coordinator's own judgment (default)
+#   eager  — prefer dispatching over doing multi-step work itself (alias: yolo)
+# Routing preferences are shared by every client of this Hub.
+mode = "auto"
+# Free-text routing preferences relayed verbatim to the coordinator via
+# list_agents; they override the default worker split. Example:
+# instructions = """Research goes to antigravity. Coding goes to grok.
+# Never dispatch test runs; run them yourself."""
+instructions = ""
+
+[agents.grok]
+protocol = "acp"
+command = ["grok", "--no-auto-update", "agent", "--always-approve", "--no-leader", "stdio"]
+session_meta = { yoloMode = true }
+revivable = true
+idle_unload_sec = 900
+
+[agents.kimi]
+protocol = "acp"
+command = ["kimi", "acp"]
+# Kimi ignores _meta on session/new: a fresh session starts in `default` mode,
+# which asks for approval per tool call. Bridge switches it to yolo, and sets
+# model/thinking, through session/set_mode and session/set_config_option once
+# the session exists. Auth is `kimi login` on disk, not an env var.
+revivable = true
+idle_unload_sec = 900
+
+[agents.cursor]
+protocol = "acp"
+command = ["cursor-agent", "acp"]
+fallback_commands = [["agent", "acp"]]
+revivable = false
+idle_unload_sec = 0
+
+[agents.dsh]
+protocol = "acp"
+# New dsh releases expose ACP as `dsh --profile acp`; older releases use the
+# published demo. Discovery order is: DSH_ACP_BIN, native dsh ACP,
+# PATH `dsh-acp-demo`, then $AGENT_BRIDGE_HOME/dsh-acp/dist/index.js.
+# Legacy demo installations must specify their working --config path explicitly.
+# Providers come from that user's $DSH_HOME — do not pin a vendor here.
+command = ["dsh-acp-demo"]
+env = { DSH_PERMISSION_MODE = "danger-full-access" }
+revivable = false
+idle_unload_sec = 0
+
+[agents.claude]
+protocol = "acp"
+# Product `claude` has no ACP profile. Bridge drives the published adapter
+# `@agentclientprotocol/claude-agent-acp` (bin `claude-agent-acp`). Auth is
+# `claude auth login` on disk, ANTHROPIC_API_KEY, or a gateway
+# (ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL, e.g. OpenRouter).
+command = ["claude-agent-acp"]
+fallback_commands = [["claude-code-acp"]]
+revivable = true
+idle_unload_sec = 900
+
+[agents.opencode]
+protocol = "acp"
+command = ["opencode", "acp"]
+# OpenCode has no product login. Providers (official Zen / Go, or any other
+# API-key connection added with `opencode auth`) are selected after
+# session/new through session/set_config_option. Revive via session/resume:
+# session/load replays the whole history and can outlast the handshake timeout.
+revivable = true
+idle_unload_sec = 900
+
+[agents.devin]
+protocol = "acp"
+# Devin CLI is a native ACP server. A fresh session starts in accept-edits;
+# Bridge switches it to bypass and sets the model through
+# session/set_config_option. Model ids carry the level (swe-1-7-medium,
+# claude-opus-5-high) — there is no separate effort. Auth is `devin auth
+# login` on disk or WINDSURF_API_KEY. Revive is session/load (replays history).
+command = ["devin", "acp"]
+revivable = true
+idle_unload_sec = 900
+
+[agents.zcode]
+protocol = "acp"
+# Product `zcode` has no ACP profile. Bridge drives `zcode-acp-server`
+# (npm `zcode-acp-server`). Bare `zcode-acp` is a TUI, so the fallback is
+# the explicit `server` subcommand. A fresh session is yolo unless
+# ZCODE_ACP_MODE overrides it; Bridge re-asserts yolo. Model values are
+# provider\model. Thought level is per model. Auth is the ZCode app login
+# at ~/.zcode/v2 (or ZCODE_HOME). Revive is session/resume — session/load
+# replays history.
+command = ["zcode-acp-server"]
+fallback_commands = [["zcode-acp", "server"]]
+revivable = true
+idle_unload_sec = 900
+
+[agents.minimax]
+protocol = "acp"
+# MiniMax Code's own ACP server. permissionMode starts at default (ask);
+# Bridge switches it to bypassPermissions. Model slugs are provider/model
+# or provider/model#variant. thinkingEffort is per model. Auth is
+# `mcode login` under ~/.minimax (or MINIMAX_DATA_DIR). Revive is
+# session/resume — session/load replays history.
+command = ["mcode", "acp"]
+revivable = true
+idle_unload_sec = 900
+
+[agents.antigravity]
+protocol = "agy"
+command = ["agy"]
+revivable = true
+idle_unload_sec = 0
+
+[agents.codex]
+protocol = "codex"
+# PATH `codex` is last. Bridge prefers Desktop's CODEX_CLI_PATH / Local\\OpenAI\\Codex\\bin.
+command = ["codex"]
+# Default is --approve-for-me (auto review + workspace-write). yolo is explicit only.
+# session_meta = { yolo = true }
+revivable = true
+idle_unload_sec = 0

@@ -13,6 +13,11 @@
 
 ## English
 
+The TypeScript + Node.js V2 now runs a shared Hub with managed Workers, task
+queues, native-session resume and peer messaging. See the [V2 runtime](v2/README.md)
+and [migration notes](v2/MIGRATION.md). V2 is an alpha pending live-product validation.
+The installation instructions below still describe the current Python release.
+
 Agent Bridge is a connector for local coding agents. A coordinator — Codex, Cursor, Kimi Code, ZCode, Grok Build, Claude Code, or Devin — directs Antigravity CLI, Grok Build, Kimi Code, DeepSeek Harness, OpenCode, Claude Code, Codex CLI, Devin CLI, ZCode, and MiniMax Code. The same product can be a coordinator and a worker; those are different processes. More agents will follow.
 
 ```text
@@ -167,6 +172,10 @@ uv run pytest
 `tests/` is pytest only. Live coordinator drills use a local `lab/` folder from `scripts/setup_lab.py` — that directory is not in git.
 
 ## 中文
+
+中心化 TypeScript + Node.js V2 已实现共享 Hub、Worker 执行、会话续接和双向通信。
+参见 [V2 运行时](v2/README.md)、[迁移说明](v2/MIGRATION.md)和[架构说明](v2/ARCHITECTURE.zh-CN.md)。
+当前为待真实产品验证的 alpha；以下安装说明仍对应当前 Python 版本。
 
 Agent Bridge 是一个联通各个本地 Agent 的连接器。由协调者——Codex、Cursor、Kimi Code、ZCode、Grok Build、Claude Code 或 Devin——指挥 Antigravity CLI、Grok Build、Kimi Code、DeepSeek Harness、OpenCode、Claude Code、Codex CLI、Devin CLI、ZCode、MiniMax Code 进行工作。同一个产品可以同时是协调者和 Worker，但那是不同进程。后续将推出更多 Agent 支持。
 
