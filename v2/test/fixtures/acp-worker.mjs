@@ -76,7 +76,8 @@ async function handle(msg) {
     const cancelled = /WAIT_FOR_CANCEL/.test(prompt);
     const childWork = /SPAWN_CHILD/.test(prompt);
     if (childWork) {
-      spawn(process.execPath, ['-e', `const fs=require('fs');setInterval(()=>fs.appendFileSync(process.env.FIXTURE_STATE+'/heartbeat','x'),25)`], { stdio: 'ignore', env: process.env });
+      // Real CLI shell tools may create their own process group and ignore TERM.
+      spawn(process.execPath, ['-e', `const fs=require('fs');process.on('SIGTERM',()=>{});setInterval(()=>fs.appendFileSync(process.env.FIXTURE_STATE+'/heartbeat','x'),25)`], { detached: process.platform !== 'win32', stdio: 'ignore', env: process.env });
     }
     await writeFile(join(root, `started-${s.id}`), JSON.stringify({ pid: process.pid, gate }));
     if (gate || cancelled || childWork) {

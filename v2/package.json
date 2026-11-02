@@ -15,6 +15,7 @@
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
     "smoke:package": "node test/package-smoke.mjs",
+    "smoke:opencode": "npm run build && node --test test/opencode-smoke.mjs",
     "prepack": "npm run build",
     "start": "node dist/cli.js hub",
     "mcp": "node dist/cli.js mcp"

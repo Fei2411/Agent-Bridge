@@ -7,8 +7,9 @@ or send it a message. Managed Workers can delegate and reply through the same
 Hub, with their own bound identity.
 
 This is **2.0.0-alpha.1**. ACP, Codex exec and Antigravity stream transports are
-implemented and exercised with real subprocess protocol fixtures. Live product
-CLIs are not validated in this development environment. See [MIGRATION.md](MIGRATION.md)
+implemented and exercised with real subprocess protocol fixtures. OpenCode 1.19.5
+has also been exercised on Linux with a local mock model and real CLI tools;
+authenticated providers and the other product CLIs still need validation. See [MIGRATION.md](MIGRATION.md)
 for compatibility gaps and the product verification procedure. The Python release
 remains separately usable; V2 does not modify its state files.
 
@@ -169,7 +170,10 @@ Completed results survive restart. Unfinished queued/running tasks become
 since arbitrary code execution cannot be replayed exactly once.
 
 Each Worker has a guardian process. Loss of the Hub IPC connection triggers cleanup
-of the owned process group/tree; cancelling a turn also stops descendants. Output
+of the owned process group/tree; cancelling a turn also stops descendants. POSIX
+cleanup captures descendants before signalling the CLI, including shells that
+start separate process groups. Already-orphaned background services are outside
+this ownership boundary; Bridge does not act as an OS service supervisor. Output
 and diagnostics are persisted incrementally. Git workspaces are compared before
 and after turns, supplemented with adapter-reported changes; a nongit workspace
 reports file collection as unavailable instead of pretending it is complete.

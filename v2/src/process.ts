@@ -1,6 +1,6 @@
 import { fork, spawn as nativeSpawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { access, readdir, stat } from 'node:fs/promises';
+import { access, readdir, readFile, readlink, stat } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, delimiter, isAbsolute, join, resolve } from 'node:path';
@@ -148,16 +148,59 @@ export function launch(command: string[], cwd: string, env: NodeJS.ProcessEnv, g
   };
 }
 
+// CLIs can start shells in separate process groups. Capture their descendants
+// before stopping the parent, while the ancestry is still available.
+export async function descendants(pid: number): Promise<number[]> {
+  if (process.platform === 'win32') return []; // taskkill /T owns discovery.
+  let rows: { id: number; parent: number; local: number }[], root: number | undefined;
+  if (process.platform === 'linux') {
+    const namespace = await readlink('/proc/self/ns/pid');
+    const self = await readFile('/proc/self/status', 'utf8');
+    const depth = self.match(/^NSpid:\s+(.+)$/m)![1]!.trim().split(/\s+/).length - 1;
+    const entries = await Promise.all((await readdir('/proc')).filter(id => /^\d+$/.test(id)).map(async id => {
+      try {
+        const status = await readFile(`/proc/${id}/status`, 'utf8');
+        const local = Number(status.match(/^NSpid:\s+(.+)$/m)?.[1]?.trim().split(/\s+/)[depth]);
+        if (!local) return undefined;
+        // A container may mount an ancestor's procfs. Resolve the root in our
+        // namespace; NSpid maps descendants back to signalable local IDs.
+        if (local === pid && await readlink(`/proc/${id}/ns/pid`) === namespace) root = Number(id);
+        return { id: Number(id), parent: Number(status.match(/^PPid:\s+(\d+)/m)?.[1]), local };
+      } catch (error) {
+        if (['ENOENT', 'ESRCH', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) return undefined;
+        throw error;
+      }
+    }));
+    rows = entries.filter(row => row !== undefined);
+  } else {
+    root = pid;
+    const result = await capture(['ps', '-A', '-o', 'pid=,ppid=']);
+    if (result.code !== 0) throw new Error(`Cannot enumerate worker descendants: ${result.stderr}`);
+    rows = result.stdout.trim().split('\n').map(line => {
+      const [id, parent] = line.trim().split(/\s+/).map(Number);
+      return { id: id!, parent: parent!, local: id! };
+    });
+  }
+  if (root === undefined) return []; // The worker exited during discovery.
+  const found: number[] = [], pending = [root];
+  for (const parent of pending) for (const row of rows) if (row.parent === parent) {
+    pending.push(row.id); found.push(row.local);
+  }
+  return found.reverse();
+}
+
 // Native spawn is used only for OS process-tree cleanup; application commands
 // go through cross-spawn so npm .cmd shims work on Windows without shell strings.
-export async function killTree(pid: number, signal: NodeJS.Signals): Promise<void> {
+export async function killTree(pid: number, signal: NodeJS.Signals, children: number[] = []): Promise<void> {
   if (process.platform === 'win32') {
     await new Promise<void>(resolve => {
       const child = nativeSpawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
       child.once('error', () => resolve()); child.once('close', () => resolve());
     });
   } else {
-    try { process.kill(-pid, signal); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    for (const target of [...children, pid]) for (const id of [-target, target]) {
+      try { process.kill(id, signal); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error; }
+    }
   }
 }

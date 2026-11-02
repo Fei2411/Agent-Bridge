@@ -1,6 +1,6 @@
 import spawn from 'cross-spawn';
 import type { ChildProcess } from 'node:child_process';
-import { killTree } from './process.js';
+import { descendants, killTree } from './process.js';
 
 // This small guardian owns the worker's process tree. IPC disconnect fires when
 // the Hub is killed, so workers do not keep modifying files after losing owner.
@@ -8,13 +8,16 @@ let worker: ChildProcess | undefined;
 let graceSeconds = 5;
 let stopping = false;
 let escalation: NodeJS.Timeout | undefined;
+let children: number[] = [];
 async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
   if (!worker?.pid) { process.exitCode = 1; process.disconnect?.(); return; }
-  await killTree(worker.pid, 'SIGTERM');
+  try { children = await descendants(worker.pid); }
+  catch (error) { console.error(`Worker descendant discovery: ${String(error)}`); }
+  await killTree(worker.pid, 'SIGTERM', children);
   if (worker.exitCode === null && worker.signalCode === null) {
-    escalation = setTimeout(() => { if (worker?.pid) void killTree(worker.pid, 'SIGKILL'); }, graceSeconds * 1000);
+    escalation = setTimeout(() => { if (worker?.pid) void killTree(worker.pid, 'SIGKILL', children); }, graceSeconds * 1000);
   }
 }
 process.on('message', (input: { command?: string[]; graceSeconds?: number; stop?: boolean }) => {
@@ -30,7 +33,7 @@ process.on('message', (input: { command?: string[]; graceSeconds?: number; stop?
   worker.stdout!.pipe(process.stdout);
   worker.stderr!.pipe(process.stderr);
   worker.once('error', error => { console.error(error.message); process.exitCode = 1; });
-  worker.once('exit', () => { if (worker?.pid) void killTree(worker.pid, 'SIGKILL'); });
+  worker.once('exit', () => { if (worker?.pid) void killTree(worker.pid, 'SIGKILL', children); });
   worker.once('close', code => {
     if (escalation) clearTimeout(escalation);
     process.stdin.unpipe(); process.stdin.destroy();

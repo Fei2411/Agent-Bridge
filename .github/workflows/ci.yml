@@ -25,6 +25,14 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run smoke:package
+      - name: Real OpenCode with a local mock model (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          OPENCODE_SMOKE_BIN: ${{ runner.temp }}/opencode-smoke/node_modules/.bin/opencode
+        run: |
+          npm install --prefix "$RUNNER_TEMP/opencode-smoke" opencode-ai@1.19.5 --no-audit --no-fund
+          npm run smoke:opencode
 
   test:
     strategy:

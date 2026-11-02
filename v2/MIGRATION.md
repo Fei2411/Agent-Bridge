@@ -85,9 +85,49 @@ CI defines Node 24 jobs on Linux, Windows and macOS, alongside unchanged Python
 jobs. Local Linux results are not evidence that the other operating systems or
 live product versions have passed; inspect the branch's CI before merging.
 
+### Real CLI with a mock model
+
+The opt-in smoke runs **OpenCode 1.19.5** against a loopback OpenAI-compatible
+streaming endpoint. Only model responses are mocked: OpenCode executes its real
+shell tools and injected MCP tools, using separate Hub and MCP proxy processes,
+native session storage, and disposable Git workspaces. No real API key is needed.
+The Linux CI job installs the same pinned CLI and runs this smoke.
+
+On Linux, from `v2`:
+
+```sh
+npm install --prefix /tmp/bridge-opencode opencode-ai@1.19.5 --no-audit --no-fund
+OPENCODE_SMOKE_BIN=/tmp/bridge-opencode/node_modules/.bin/opencode npm run smoke:opencode
+```
+
+Verified locally with Node 24.22.1 on Linux:
+
+- File edits are made by actual CLI tool calls and appear in Bridge's result.
+- Two MCP clients share work; disconnecting the submitter does not stop it.
+- Repeated request IDs deduplicate; queued turns execute in order and switch
+  between mock model IDs. The model receives the earlier native history.
+- Cancelling active and queued tasks aborts the model request; later turns retain
+  the native session ID and history after the worker process restarts.
+- A message wakes a real CLI, which uses injected Bridge MCP tools to discover,
+  delegate to another real CLI, wait, read its result, and reply in the same thread.
+- Abrupt Hub death stops an active shell tool, including a separate process group.
+  Restart retains completed results, marks unfinished work interrupted, and resumes
+  the original native conversation without repeating the file write.
+
+This smoke found a process-cleanup defect: signalling only the CLI's process group
+left OpenCode's shell process running. Cleanup now discovers descendants before
+stopping the CLI and retains their IDs for forced cleanup. The regression also
+uses a separate-group child that ignores SIGTERM. It fails before the fix and
+passes after it. A background process already orphaned before shutdown cannot be
+identified by its former ancestry and is not covered by this cleanup guarantee.
+
+The mock scripts deterministic responses; it does not validate model reasoning,
+provider authentication, billing, effort semantics, or other CLI versions/platforms.
+
 ## Live product release gate
 
-No authenticated product Agent CLIs were available in the implementation environment.
+Real OpenCode with a mock model is covered above. Authenticated providers and the
+remaining product Agent CLIs have not yet been exercised in this environment.
 Before promoting this alpha as the Python replacement, use each available real CLI:
 
 1. Record CLI/version, selected model/effort and login route. Run a real file edit
