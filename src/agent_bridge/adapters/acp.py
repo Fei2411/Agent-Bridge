@@ -1521,6 +1521,50 @@ class AcpAdapter(Adapter):
             return
         live.applied_effort = level
 
+    async def _sync_generic_acp_selection(self, live: _Live, session: Session) -> None:
+        """Generic ACP workers (custom ``protocol = "acp"`` entries): apply
+        ``session.model``/``session.effort`` when the session advertises the
+        standard config options, as ``agy acp`` does.
+
+        A tiered slug that misses the advertised family list is split into
+        family + tier (``gemini-3.8-flash-high`` → model ``gemini-3.8-flash``,
+        tier ``high``) so coordinator tiered ids still map. session.model is
+        rewritten to the applied family so state and audits record reality.
+        """
+        if self.agent.name in _MODEL_EFFORT_AGENTS or live.conn is None or not session.native_session_id:
+            return
+        if not session.model and not session.effort:
+            return
+        tier: str | None = None
+        if session.model:
+            _current, offered = config_option_values(live.config_options, "model")
+            if offered and session.model not in offered:
+                for suffix in ("-xhigh", "-high", "-medium", "-low"):
+                    family = session.model[: -len(suffix)]
+                    if session.model.endswith(suffix) and family in offered:
+                        tier = suffix[1:]
+                        session.model = family
+                        break
+            await self._sync_model_option(live, session)
+        effective_effort = session.effort or tier
+        if effective_effort:
+            for option_id in ("thought_level", "effort", "reasoning_effort", "thinking"):
+                current, offered = config_option_values(live.config_options, option_id)
+                if not offered:
+                    continue
+                if effective_effort in offered:
+                    if effective_effort != current:
+                        await self._set_config_option(live, session, option_id, effective_effort)
+                    live.applied_effort = effective_effort
+                else:
+                    message = (
+                        f"{self.agent.name} effort={effective_effort} has no counterpart in "
+                        f"{option_id} {offered}; the session keeps its current level"
+                    )
+                    log.warning("%s", message)
+                    live.pending_warnings.append(message)
+                break
+
     async def _sync_selection(self, live: _Live, session: Session) -> None:
         try:
             await self._sync_grok_model(live, session)
@@ -1532,6 +1576,7 @@ class AcpAdapter(Adapter):
             await self._sync_dsh_selection(live, session)
             await self._sync_zcode_selection(live, session)
             await self._sync_minimax_selection(live, session)
+            await self._sync_generic_acp_selection(live, session)
         except Exception as exc:
             raise self._failure(exc, "session/configure", session) from None
 
@@ -1723,7 +1768,11 @@ class AcpAdapter(Adapter):
         live.client.reset_turn()
         warnings: list[str] = live.pending_warnings
         live.pending_warnings = []
-        if self.agent.name not in _MODEL_EFFORT_AGENTS and (task.model or task.effort):
+        if (
+            self.agent.name not in _MODEL_EFFORT_AGENTS
+            and not live.applied_model
+            and (task.model or task.effort)
+        ):
             warnings.append(
                 f"{self.agent.name} has no model/effort selection; "
                 f"model={task.model!r} effort={task.effort!r} were ignored"
